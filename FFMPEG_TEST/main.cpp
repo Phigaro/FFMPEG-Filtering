@@ -45,6 +45,8 @@ AVFormatContext		*ofmt_ctx = NULL;
 
 static const int dst_width = 480;
 static const int dst_height = 320;
+static const int start_time = 10;
+static const int end_time = 20;
 
 
 static FilterContext vfilter_ctx, afilter_ctx;
@@ -54,6 +56,7 @@ static int init_video_filter()
 	AVStream* stream = ifmt_ctx->streams[0];
 	AVCodecContext* codec_ctx = stream->codec;
 	AVFilterContext* rescale_filter;
+	AVFilterContext* rotate_filter;
 	AVFilterInOut *inputs, *outputs;
 	char args[512];
 
@@ -110,18 +113,31 @@ static int init_video_filter()
 		printf("Failed to create video buffer sink\n");
 		return -3;
 	}
+	
+	snprintf(args, sizeof(args),"%f/%f",0.1,0.4);
 
-	// Create rescaler filter to resize video resolution
-	snprintf(args, sizeof(args), "%d:%d", dst_width, dst_height);
+	AVFilter* Temp = avfilter_get_by_name("edgedetect");
 
 	if (avfilter_graph_create_filter(
 		&rescale_filter
-		, avfilter_get_by_name("scale")
-		, "scale", args, NULL, vfilter_ctx.filter_graph) < 0)
+		, avfilter_get_by_name("negate")
+		, "chromakey1", NULL, NULL, vfilter_ctx.filter_graph) < 0)
 	{
 		printf("Failed to create video scale filter\n");
 		return -4;
 	}
+
+	 //Create rescaler filter to resize video resolution
+	//snprintf(args, sizeof(args), "%d:%d", dst_width, dst_height);
+
+	//if (avfilter_graph_create_filter(
+	//	&rescale_filter
+	//	, avfilter_get_by_name("scale")
+	//	, "scale", args, NULL, vfilter_ctx.filter_graph) < 0)
+	//{
+	//	printf("Failed to create video scale filter\n");
+	//	return -4;
+	//}
 
 	// link rescaler filter with aformat filter
 	if (avfilter_link(outputs->filter_ctx, 0, rescale_filter, 0) < 0)
@@ -149,6 +165,8 @@ static int init_video_filter()
 	avfilter_inout_free(&inputs);
 	avfilter_inout_free(&outputs);
 }
+
+
 
 int main()
 {
@@ -245,8 +263,12 @@ int main()
 	}
 
 	c->profile = FF_PROFILE_H264_BASELINE;
-	c->width = 480;
-	c->height = 320;
+	c->width = ifmt_ctx->streams[nVSI]->codec->width;
+	c->height = ifmt_ctx->streams[nVSI]->codec->height;
+
+	/*c->width = 300;
+	c->height = 200;*/
+
 	c->time_base = { 1,25 };
 	c->pix_fmt = ifmt_ctx->streams[nVSI]->codec->pix_fmt;
 	c->bit_rate = 50000;
