@@ -1,4 +1,4 @@
-///> Include FFMpeg
+ï»¿///> Include FFMpeg
 
 #define _CRT_SECURE_NO_DEPRECATE
 #pragma warning(disable:4996)
@@ -25,6 +25,8 @@ extern "C"
 #endif
 }
 
+#define Video_flag 0
+#define Audio_flag 1
 
 ///> Library Link On Windows System
 #pragma comment( lib, "avformat.lib" )   
@@ -39,30 +41,238 @@ typedef struct _FilterContext {
 	AVFilterContext* sink_ctx;
 } FilterContext;
 
+typedef struct _Codec_Set {
+	AVCodec *codec = NULL;
+	AVCodecContext *V_codec_ctx = NULL;
+	AVCodecContext *A_codec_ctx = NULL;
+} Codec_Set;
+
+AVInputFormat		*ifmt = NULL;
 AVOutputFormat		*ofmt = NULL;
 AVFormatContext		*ifmt_ctx = NULL;
 AVFormatContext		*ofmt_ctx = NULL;
 
-static const int dst_width = 480;
-static const int dst_height = 320;
-static const int start_time = 10;
-static const int end_time = 20;
+int nVSI = -1;
+int nASI = -1;
 
+AVCodecID			v_codec_id	= AV_CODEC_ID_H264;
+AVCodecID			a_codec_id	= AV_CODEC_ID_MP2;
+
+const char			*szFilePath = "./Test_Video/Test_Video.mp4";
+const char			*outputfile = "./Test_Video/output.mp4";
 
 static FilterContext vfilter_ctx, afilter_ctx;
 
+static AVFormatContext* init_input_format(const char* input_file_path) {
+
+	AVCodec			*codec			= NULL;
+	AVCodecContext	*c				= NULL;
+	AVFormatContext	*p_ifmt_ctx		= NULL;
+	nVSI = -1;
+	nASI = -1;
+
+	if ((avformat_open_input(&p_ifmt_ctx, input_file_path, 0, 0)) < 0)
+	{
+		fprintf(stderr, "Could not open input file '%s'", input_file_path);
+	}
+
+	if ((avformat_find_stream_info(p_ifmt_ctx, 0)) < 0)
+	{
+		fprintf(stderr, "Failed to retrieve input stream information");
+	}
+
+	av_dump_format(p_ifmt_ctx, 0, input_file_path, 0);
+
+	///> Find Video Stream
+	for (int i = 0; i < p_ifmt_ctx->nb_streams; i++)
+	{
+		if (nVSI < 0 && p_ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
+		{
+			nVSI = i;
+		}
+		else if (nASI < 0 && p_ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO)
+		{
+			nASI = i;
+		}
+	}
+
+	if (nVSI < 0 && nASI < 0)
+	{
+		av_log(NULL, AV_LOG_ERROR, "No Video & Audio Streams were Found\n");
+		return 0;
+	}
+
+	return p_ifmt_ctx;
+}
+
+static AVFormatContext* init_output_format(AVFormatContext* p_ifmt_ctx, const char* output_file_path, AVCodecContext* enc_codec_ctx) {
+	AVOutputFormat	*p_ofmt		= NULL;
+	AVFormatContext	*p_ofmt_ctx = NULL;
+
+	avformat_alloc_output_context2(&p_ofmt_ctx, NULL, NULL, outputfile);
+	if (!p_ofmt_ctx)
+	{
+		fprintf(stderr, "Could not create output context\n");
+	}
+
+	p_ofmt = p_ofmt_ctx->oformat;
+
+	int ret = 0;
+	for (int i = 0; i < p_ifmt_ctx->nb_streams; i++)
+	{
+		AVStream *in_stream		= p_ifmt_ctx->streams[i];
+		AVStream *out_stream	= avformat_new_stream(p_ofmt_ctx, in_stream->codec->codec);
+
+		if (p_ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
+		{
+			ret = avcodec_copy_context(out_stream->codec, enc_codec_ctx);
+			out_stream->codec->codec_tag = 0;//ë¬¸ì„œ
+		}
+		else if (p_ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO)
+		{
+			ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
+			out_stream->codec->codec_tag = 0;
+		}
+
+		if (ret < 0) {
+			fprintf(stderr, "Failed to copy context from input to output stream codec context\n");
+		}
+
+		if (p_ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
+		{
+			out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+		}
+	}
+
+	av_dump_format(p_ofmt_ctx, 0, output_file_path, 1);
+
+	if (!(p_ofmt->flags & AVFMT_NOFILE))
+	{
+		ret = avio_open(&p_ofmt_ctx->pb, output_file_path, AVIO_FLAG_WRITE);
+		if (ret < 0)
+		{
+			fprintf(stderr, "Could not open output file '%s'", output_file_path);
+		}
+	}
+
+	ret = avformat_write_header(p_ofmt_ctx, NULL);
+	if (ret < 0)
+	{
+		fprintf(stderr, "Error occurred when opening output file\n");
+	}
+	return p_ofmt_ctx;
+}
+
+static AVCodecContext* init_encoder(AVFormatContext* p_ifmt_ctx, AVCodecID V_Codec_ID, AVCodecID A_Codec_ID) {
+
+	AVCodec			*codec	= NULL;
+	AVCodecContext	*c		= NULL;
+
+	codec = avcodec_find_encoder(v_codec_id);
+	if (!codec)
+	{
+		fprintf(stderr, "Codec not found\n");
+		return 0;
+	}
+
+	c = avcodec_alloc_context3(codec);
+	if (!c)
+	{
+		fprintf(stderr, "Could not allocate video codec context\n");
+		return 0;
+	}
+
+	// Example
+	c->profile		= FF_PROFILE_H264_BASELINE;
+	c->width		= p_ifmt_ctx->streams[nVSI]->codec->width;
+	c->height		= p_ifmt_ctx->streams[nVSI]->codec->height;
+	c->pix_fmt		= p_ifmt_ctx->streams[nVSI]->codec->pix_fmt;
+	c->time_base	= { 1,25 };
+	c->bit_rate		= 50000;
+
+	if (avcodec_open2(c, codec, NULL) < 0)
+	{
+		fprintf(stderr, "Could not open codec\n");
+		return 0;
+	}
+
+	return c;
+}
+
+static AVCodecContext* init_decoder(AVFormatContext *p_ifmt_ctx, int flag) {
+	AVCodecContext *pVCtx = p_ifmt_ctx->streams[nVSI]->codec;
+	AVCodecContext *pACtx = p_ifmt_ctx->streams[nASI]->codec;
+
+	for (int i = 0; i < p_ifmt_ctx->nb_streams; i++)
+	{
+		if (nVSI < 0 && p_ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
+		{
+			nVSI = i;
+		}
+		else if (nASI < 0 && p_ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO)
+		{
+			nASI = i;
+		}
+	}
+	if (nVSI < 0 && nASI < 0)
+	{
+		av_log(NULL, AV_LOG_ERROR, "No Video & Audio Streams were Found\n");
+		return 0;
+	}
+
+	///> Find Video Decoder
+	AVCodec	*pVideoCodec = avcodec_find_decoder(p_ifmt_ctx->streams[nVSI]->codec->codec_id);
+
+	if (pVideoCodec == NULL)
+	{
+		av_log(NULL, AV_LOG_ERROR, "No Video Decoder was Found\n");
+		return 0;
+	}
+
+	///> Initialize Codec Context as Decoder
+	if (avcodec_open2(pVCtx, pVideoCodec, NULL) < 0)
+	{
+		av_log(NULL, AV_LOG_ERROR, "Fail to Initialize Decoder\n");
+		return 0;
+	}
+
+	///> Find Audio Decoder
+	AVCodec *pAudioCodec = avcodec_find_decoder(p_ifmt_ctx->streams[nASI]->codec->codec_id);
+
+	if (pAudioCodec == NULL)
+	{
+		av_log(NULL, AV_LOG_ERROR, "No Audio Decoder was Found\n");
+		return 0;
+	}
+
+	///> Initialize Codec Context as Decoder
+	if (avcodec_open2(pACtx, pAudioCodec, NULL) < 0)
+	{
+		av_log(NULL, AV_LOG_ERROR, "Fail to Initialize Decoder\n");
+		return 0;
+	}
+
+	if (flag) {
+		return pACtx;
+	}
+	else {
+		return pVCtx;
+	}
+}
+
 static int init_video_filter()
 {
-	AVStream* stream = ifmt_ctx->streams[0];
-	AVCodecContext* codec_ctx = stream->codec;
-	AVFilterContext* rescale_filter;
-	AVFilterContext* rotate_filter;
-	AVFilterInOut *inputs, *outputs;
+	AVStream		*stream		= ifmt_ctx->streams[0];
+	AVCodecContext	*codec_ctx	= stream->codec;
+
+	AVFilterContext	*rescale_filter;
+	AVFilterContext	*rotate_filter;
+	AVFilterInOut	*inputs, *outputs;
 	char args[512];
 
-	vfilter_ctx.filter_graph = NULL;
-	vfilter_ctx.src_ctx = NULL;
-	vfilter_ctx.sink_ctx = NULL;
+	vfilter_ctx.filter_graph	= NULL;
+	vfilter_ctx.src_ctx			= NULL;
+	vfilter_ctx.sink_ctx		= NULL;
 
 	// Allocate memory for filter graph
 	vfilter_ctx.filter_graph = avfilter_graph_alloc();
@@ -113,31 +323,17 @@ static int init_video_filter()
 		printf("Failed to create video buffer sink\n");
 		return -3;
 	}
-	
-	snprintf(args, sizeof(args),"%f/%f",0.1,0.4);
 
-	AVFilter* Temp = avfilter_get_by_name("edgedetect");
+	snprintf(args, sizeof(args), "%f/%f", 0.1, 0.4);
 
 	if (avfilter_graph_create_filter(
 		&rescale_filter
 		, avfilter_get_by_name("negate")
-		, "chromakey1", NULL, NULL, vfilter_ctx.filter_graph) < 0)
+		, "F_Name", NULL, NULL, vfilter_ctx.filter_graph) < 0)
 	{
 		printf("Failed to create video scale filter\n");
 		return -4;
 	}
-
-	 //Create rescaler filter to resize video resolution
-	//snprintf(args, sizeof(args), "%d:%d", dst_width, dst_height);
-
-	//if (avfilter_graph_create_filter(
-	//	&rescale_filter
-	//	, avfilter_get_by_name("scale")
-	//	, "scale", args, NULL, vfilter_ctx.filter_graph) < 0)
-	//{
-	//	printf("Failed to create video scale filter\n");
-	//	return -4;
-	//}
 
 	// link rescaler filter with aformat filter
 	if (avfilter_link(outputs->filter_ctx, 0, rescale_filter, 0) < 0)
@@ -166,269 +362,85 @@ static int init_video_filter()
 	avfilter_inout_free(&outputs);
 }
 
-
-
 int main()
 {
-	AVCodecID			v_codec_id = AV_CODEC_ID_H264;
-	AVCodecID			a_codec_id = AV_CODEC_ID_MP2;
-
-	const char			*szFilePath = "./Test_Video/Test_Video.mp4";//x264
-	const char			*outputfile = "./Test_Video/output.mp4";
-
+	// register
 	av_register_all();
-
-	// ¸ðµç ÇÊÅÍ¸¦ µî·ÏÇÔ
 	avfilter_register_all();
-
 
 #ifdef _NETWORK
 	avformat_network_init();
 #endif
 
-	// ** ÇÊÅÍ »ý¼º ÈÄ ¸Þ¸ð¸® ÇÒ´ç ** //
-	AVFilterGraph *avfilter_graph_alloc(void);
-	void avfilter_graph_free(AVFilterGraph **graph);
+	ifmt_ctx = init_input_format(szFilePath);
 
-	AVFilterGraph *TempFilter;
-	TempFilter = avfilter_graph_alloc();
+	AVCodecContext* enc_codec_ctx	= init_encoder(ifmt_ctx, v_codec_id, a_codec_id);
 
-	avfilter_graph_free(&TempFilter);
-	// ** ÇÊÅÍ »ý¼º ÈÄ ÇØÁ¦ //
+	AVCodecContext* dec_V_ctx		= init_decoder(ifmt_ctx, Video_flag);
+	AVCodecContext* dec_A_ctx		= init_decoder(ifmt_ctx, Audio_flag);
 
-	int ret = 0;
-
-	if ((avformat_open_input(&ifmt_ctx, szFilePath, 0, 0)) < 0)
-	{
-		fprintf(stderr, "Could not open input file '%s'", szFilePath);
-	}
-
-	if ((avformat_find_stream_info(ifmt_ctx, 0)) < 0)
-	{
-		fprintf(stderr, "Failed to retrieve input stream information");
-	}
-
-	av_dump_format(ifmt_ctx, 0, szFilePath, 0);
-
-	/* ********************************************************************************** */
-	//	avformat_alloc_output_context2(&ofmt_ctx, NULL, ifmt_ctx->iformat->name, outputfile);
-	//	m4a, mj2 ¹ÌÁö¿ø ifmt_ctx->iformat->name ¿¹¿Ü Ã³¸® ÇÊ¿ä
-	//	avformat_alloc_output_context2(&ofmt_ctx, NULL, "mp4", outputfile);
-	/* ********************************************************************************** */
-
-	avformat_alloc_output_context2(&ofmt_ctx, NULL, "mp4", outputfile);
-
-	if (!ofmt_ctx)
-	{
-		fprintf(stderr, "Could not create output context\n");
-	}
-	///> Find Video Stream
-	int	nVSI = -1;
-	int	nASI = -1;
-	int	i;
-
-	for (i = 0; i < ifmt_ctx->nb_streams; i++)
-	{
-		if (nVSI < 0 && ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
-		{
-			nVSI = i;
-		}
-		else if (nASI < 0 && ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO)
-		{
-			nASI = i;
-		}
-	}
-
-	if (nVSI < 0 && nASI < 0)
-	{
-		av_log(NULL, AV_LOG_ERROR, "No Video & Audio Streams were Found\n");
-		return 0;
-	}
-
-	AVCodec			*codec = NULL;
-	AVCodecContext	*c = NULL;
-
-	codec = avcodec_find_encoder(v_codec_id);
-	if (!codec)
-	{
-		fprintf(stderr, "Codec not found\n");
-		return 0;
-	}
-
-	c = avcodec_alloc_context3(codec);
-	if (!c)
-	{
-		fprintf(stderr, "Could not allocate video codec context\n");
-		return 0;
-	}
-
-	c->profile = FF_PROFILE_H264_BASELINE;
-	c->width = ifmt_ctx->streams[nVSI]->codec->width;
-	c->height = ifmt_ctx->streams[nVSI]->codec->height;
-
-	/*c->width = 300;
-	c->height = 200;*/
-
-	c->time_base = { 1,25 };
-	c->pix_fmt = ifmt_ctx->streams[nVSI]->codec->pix_fmt;
-	c->bit_rate = 50000;
-
-	//480;
-	//320;
-
-	if (avcodec_open2(c, codec, NULL) < 0)
-	{
-		fprintf(stderr, "Could not open codec\n");
-		return 0;
-	}
-
-	ofmt = ofmt_ctx->oformat;
-
-	for (int i = 0; i < ifmt_ctx->nb_streams; i++)
-	{
-		AVStream *in_stream = ifmt_ctx->streams[i];
-		AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
-
-		if (ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
-		{
-			ret = avcodec_copy_context(out_stream->codec, c);
-			out_stream->codec->codec_tag = 0;//¹®¼­
-		}
-		else if (ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO)
-		{
-			ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
-			out_stream->codec->codec_tag = 0;
-		}
-
-		if (ret < 0) {
-			fprintf(stderr, "Failed to copy context from input to output stream codec context\n");
-		}
-
-		if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
-		{
-			// ÁÖÀÇ
-			out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-		}
-
-	}
-
-	av_dump_format(ofmt_ctx, 0, outputfile, 1);
-
-	if (!(ofmt->flags & AVFMT_NOFILE))
-	{
-		ret = avio_open(&ofmt_ctx->pb, outputfile, AVIO_FLAG_WRITE);
-		if (ret < 0) {
-			fprintf(stderr, "Could not open output file '%s'", outputfile);
-		}
-	}
-
-	ret = avformat_write_header(ofmt_ctx, NULL);
-	if (ret < 0)
-	{
-		fprintf(stderr, "Error occurred when opening output file\n");
-	}
-
-	AVCodecContext *pVCtx = ifmt_ctx->streams[nVSI]->codec;
-	AVCodecContext *pACtx = ifmt_ctx->streams[nASI]->codec;
-
-	///> Find Video Decoder
-	AVCodec	*pVideoCodec = avcodec_find_decoder(ifmt_ctx->streams[nVSI]->codec->codec_id);
-
-	if (pVideoCodec == NULL)
-	{
-		av_log(NULL, AV_LOG_ERROR, "No Video Decoder was Found\n");
-		return 0;
-	}
-
-	///> Initialize Codec Context as Decoder
-	if (avcodec_open2(pVCtx, pVideoCodec, NULL) < 0)
-	{
-		av_log(NULL, AV_LOG_ERROR, "Fail to Initialize Decoder\n");
-		return 0;
-	}
-
-	///> Find Audio Decoder
-	AVCodec *pAudioCodec = avcodec_find_decoder(ifmt_ctx->streams[nASI]->codec->codec_id);
-
-	if (pAudioCodec == NULL)
-	{
-		av_log(NULL, AV_LOG_ERROR, "No Audio Decoder was Found\n");
-		return 0;
-	}
-
-	///> Initialize Codec Context as Decoder
-	if (avcodec_open2(pACtx, pAudioCodec, NULL) < 0)
-	{
-		av_log(NULL, AV_LOG_ERROR, "Fail to Initialize Decoder\n");
-		return 0;
-	}
+	ofmt_ctx = init_output_format(ifmt_ctx, outputfile, enc_codec_ctx);
 
 	AVPacket pkt, outpkt;
 	AVFrame* pVFrame, *pAFrame;
+
 	int bGotPicture = 0;	// flag for video decoding
-	int bGotSound = 0;      // flag for audio decoding
+	int bGotSound	= 0;      // flag for audio decoding
 
 	pVFrame = av_frame_alloc();
 	pAFrame = av_frame_alloc();
 
 	av_init_packet(&outpkt);
-	
-	// ÇÊÅÍµÈ ÇÁ·¹ÀÓÀÌ ÀúÀåµÉ °÷;
-	AVFrame* filtered_frame = av_frame_alloc();
 
-	// ºñµð¿À ÇÊÅÍ ¼³Á¤
+	// ë¹„ë””ì˜¤ í•„í„° ì„¤ì •
 	init_video_filter();
 	int stream_index;
 
+	int ret = 0;
+	int i	= 0;
+	AVFrame* filtered_frame = av_frame_alloc();
 	while (av_read_frame(ifmt_ctx, &pkt) >= 0)
 	{
 		///> Decoding
 		if (pkt.stream_index == nVSI)
 		{
-			if (avcodec_decode_video2(pVCtx, pVFrame, &bGotPicture, &pkt) >= 0)
+			if (avcodec_decode_video2(dec_V_ctx, pVFrame, &bGotPicture, &pkt) >= 0)
 			{
-				if (bGotPicture)
+				FilterContext* filter_ctx;
+
+				stream_index = pkt.stream_index;
+
+				if (stream_index == nVSI)
 				{
-					FilterContext* filter_ctx;
+					filter_ctx = &vfilter_ctx;
+				}
+				else
+				{
+					filter_ctx = &afilter_ctx;
+				}
 
-					stream_index = pkt.stream_index;
+				// put frame into filter.
+				if (av_buffersrc_add_frame(filter_ctx->src_ctx, pVFrame) < 0)
+				{
+					printf("Error occurred when putting frame into filter context\n");
+					break;
+				}
 
-					if (stream_index == nVSI)
+				while (1)
+				{
+					// Get frame from filter, if it returns < 0 then filter is currently empty.
+					if (av_buffersink_get_frame(filter_ctx->sink_ctx, filtered_frame) < 0)
 					{
-						filter_ctx = &vfilter_ctx;
-						printf("[before] Video : resolution : %dx%d\n"
-							, pVFrame->width, pVFrame->height);
-					}
-					else
-					{
-						filter_ctx = &afilter_ctx;
-						printf("[before] Audio : sample_rate : %d / channels : %d\n"
-							, pVFrame->sample_rate, pVFrame->channels);
-					}
-
-					// put frame into filter.
-					if (av_buffersrc_add_frame(filter_ctx->src_ctx, pVFrame) < 0)
-					{
-						printf("Error occurred when putting frame into filter context\n");
 						break;
 					}
+				}
 
-					while (1)
-					{
-						// Get frame from filter, if it returns < 0 then filter is currently empty.
-						if (av_buffersink_get_frame(filter_ctx->sink_ctx, filtered_frame) < 0)
-						{
-							break;
-						}
-					}
-
-					outpkt.data = NULL;    // packet data will be allocated by the encoder
-					outpkt.size = 0;
-
-					ret			= avcodec_encode_video2(c, &outpkt, filtered_frame, &bGotPicture);
+				if (bGotPicture)
+				{
+					ret = avcodec_encode_video2(enc_codec_ctx, &outpkt, filtered_frame, &bGotPicture);
 					if (bGotPicture)
 					{
-						cout << "Write Frame [pts]=>" << outpkt.pts << " [size]=>" << outpkt.size << endl;
+						cout << "Video Write Frame [pts]=>" << outpkt.pts << "  [size]=>" << outpkt.size << endl;
 						av_interleaved_write_frame(ofmt_ctx, &outpkt);
 						av_free_packet(&outpkt);
 					}
@@ -439,17 +451,14 @@ int main()
 		{
 			if (pkt.data != NULL)
 			{
-				if (avcodec_decode_audio4(pACtx, pAFrame, &bGotSound, &pkt) >= 0)
+				if (avcodec_decode_audio4(dec_A_ctx, pAFrame, &bGotSound, &pkt) >= 0)
 				{
 					if (bGotSound)
 					{
-						outpkt.data = NULL;    // packet data will be allocated by the encoder
-						outpkt.size = 0;
-						// No Audio Encoding
 						//ret = avcodec_encode_audio2(pACtx, &outpkt, pAFrame, &bGotSound);
 						if (bGotSound)
 						{
-							cout << "Write Frame [pts]=>" << outpkt.pts << " [size]=>" << outpkt.size << endl;
+							cout << "Audio Write Frame [pts]=>" << pkt.pts << "  [size]=>" << pkt.size << endl;
 							av_interleaved_write_frame(ofmt_ctx, &pkt);
 							av_free_packet(&outpkt);
 						}
@@ -463,7 +472,7 @@ int main()
 	for (bGotPicture = 1; bGotPicture; i++)
 	{
 		fflush(stdout);
-		ret = avcodec_encode_video2(c, &pkt, NULL, &bGotPicture);
+		ret = avcodec_encode_video2(enc_codec_ctx, &pkt, NULL, &bGotPicture);
 		if (ret < 0)
 		{
 			fprintf(stderr, "Error encoding frame\n");
@@ -471,15 +480,15 @@ int main()
 		}
 		if (bGotPicture)
 		{
-			printf("Write frame %3d (size=%5d)\n", i, pkt.size);
+			cout << "Video Write Frame [pts]=>" << pkt.pts << "  [size]=>" << pkt.size << "\t\ttrailer" << endl;
 			av_interleaved_write_frame(ofmt_ctx, &pkt);
 			av_free_packet(&pkt);
 		}
 	}
 
 	av_write_trailer(ofmt_ctx);
-	avcodec_close(c);
-	av_free(c);
+	avcodec_close(enc_codec_ctx);
+	av_free(enc_codec_ctx);
 	av_free(pVFrame);
 	av_free(pAFrame);
 
