@@ -141,14 +141,21 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="헤더.h" />
+    <ClCompile Include="RGBImage.cpp" />
+    <ClCompile Include="stdafx.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="01.13.11.01.txt" />
-    <Text Include="임시저장소.txt" />
-    <Text Include="임시저장소_2.txt" />
+    <Text Include="Temp.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="RGBImage.h" />
+    <ClInclude Include="stdafx.h" />
+    <ClInclude Include="Temp_Header.h" />
+    <ClInclude Include="Temp_Header_Mywork.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="ClassDiagram.cd" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
