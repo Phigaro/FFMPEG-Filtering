@@ -13,68 +13,9 @@
 #include <ctime>
 
 using namespace std;
-//extern "C"
-//{
-//#ifdef __cplusplus
-//#define __STDC_CONSTANT_MACROS
-//#ifdef _STDINT_H
-//#undef _STDINT_H
-//#endif
-//#include <libavformat/avformat.h>
-//#include <libavutil/opt.h>
-//#include <libavutil/imgutils.h>
-//#include <libswscale/swscale.h>
-//#include <libavfilter\avfilter.h>		// Main libfilter
-//#include <libavfilter\buffersink.h>		// 필터링이 된 프레임이 들어가는 싱크 필터
-//#include <libavfilter\buffersrc.h>		// 원본 프레임이 들어가는 소스 필터
-//
-//#endif
-//}
+
+// 시간 측정용 변수
 struct timeval _start_time, _stop_time, _start_time_2, _stop_time_2;
-double _diff_secs = 0, _diff_secs_2 = 0;
-#define TIME_THIS( MSG, ... ) \
-do { \
-    gettimeofday(&_start_time, NULL); \
-    __VA_ARGS__ \
-    gettimeofday(&_stop_time, NULL); \
-    _diff_secs = (double)(_stop_time.tv_usec - _start_time.tv_usec) / 1000000 + (double)(_stop_time.tv_sec - _start_time.tv_sec); \
-    DEBUG( "%s timing results: %f seconds", MSG, _diff_secs); \
-} while ( 0 );
-
-#define TIME_START \
-    gettimeofday(&_start_time_2, NULL);
-
-#define TIME_END( MSG ) \
-do { \
-    gettimeofday(&_stop_time_2, NULL); \
-    _diff_secs_2 = (double)(_stop_time_2.tv_usec - _start_time_2.tv_usec) / 1000000 + (double)(_stop_time_2.tv_sec - _start_time_2.tv_sec); \
-    DEBUG( "%s timing results: %f seconds", MSG, _diff_secs_2); \
-} while ( 0 );
-
-typedef struct AVContext {
-	AVFormatContext *fmt_ctx;
-	AVCodecParameters *video_codecpar;
-	AVCodecContext * video_dec_ctx;
-	AVStream *video_stream;
-	int video_stream_idx;
-	AVFrame *frame;
-	AVPacket pkt;
-	enum AVMediaType type;
-	AVDictionary *opts;
-	AVCodec *dec;
-} AVContext;
-
-typedef struct Options {
-	char * input_file;
-	char * output_file_pattern;
-	int32_t * frame_indices;
-	double * frame_timestamps;
-	int nbframes;
-	char* img_size_str;
-	int img_width, img_height;
-} Options;
-
-////////////////
 
 #define Video_flag 0
 #define Audio_flag 1
@@ -88,6 +29,7 @@ typedef struct Options {
 #pragma comment( lib, "swscale.lib")
 #pragma comment( lib, "avfilter.lib")
 
+// 필터 구조체
 typedef struct _FilterContext {
 	AVFilterGraph	*filter_graph;	// Filter's Context
 	AVFilterContext	*src_ctx;		// Linked Buffer Source
@@ -97,12 +39,14 @@ typedef struct _FilterContext {
 	int last_filter_idx = 0;		// Last filter index for Linking
 } FilterContext;
 
+// 코덱 구조체
 typedef struct _Codec_Set {
 	AVCodec *codec = NULL;
 	AVCodecContext *V_codec_ctx = NULL;
 	AVCodecContext *A_codec_ctx = NULL;
 } Codec_Set;
 
+// 파일 구조체
 typedef struct _Format_ctx_Set {
 	AVInputFormat   *ifmt = NULL;
 	AVOutputFormat  *ofmt = NULL;
@@ -112,23 +56,25 @@ typedef struct _Format_ctx_Set {
 	int nASI = -1;
 } Format_ctx_Set;
 
-AVFrame *pictureFrame;
-AVFrame *m_picture_frame;
-Format_ctx_Set	*fmt_ctx = NULL;
-Format_ctx_Set	*fmt_ctx_audio = NULL;
-AVInputFormat   *ifmt = NULL;
-AVOutputFormat  *ofmt = NULL;
-AVFormatContext *picFormatCtx = NULL;
+// 사용 할 변수
+AVFrame *pictureFrame;					// 받아올 이미지 프레임
+AVFrame *m_picture_frame;				// 변환 될 이미지 프레임
+Format_ctx_Set	*fmt_ctx = NULL;		// 비디오 파일
+Format_ctx_Set	*fmt_ctx_audio = NULL;	// 오디오 파일
+AVInputFormat   *ifmt = NULL;			// input file
+AVOutputFormat  *ofmt = NULL;			// output file
+AVFormatContext *picFormatCtx = NULL;	// 이미지 파일의 정보
 
-// Filter Option
+										// Filter Option
 int angle = 0;
 int dst_width = 80 * 8;
 int dst_height = 60 * 8;
 
-//AVCodecID v_codec_id = AV_CODEC_ID_JPEG2000;
+// Codec_id
 AVCodecID v_codec_id = AV_CODEC_ID_H264;
 AVCodecID a_codec_id = AV_CODEC_ID_MP3;
 
+// File_Path
 const char *szFilePath = "./Test_Video/Test_Video.mp4";
 const char *szFilePath_2 = "./Test_Video/Test_Video_2.mp4";
 const char *szFilePath_3 = "./Test_Video/Canon.mp3";
@@ -136,6 +82,7 @@ const char *szImagePath = "./Test_Video/sample.png";
 const char *outputfile = "./Test_Video/output.mp4";
 const char *outputFormat = "mp4";
 
+// Filter
 static FilterContext vfilter_ctx, afilter_ctx;
 
 static AVFormatContext* init_input_format(const char* input_file_path, Format_ctx_Set* fmt_ctx) {
@@ -176,65 +123,6 @@ static AVFormatContext* init_input_format(const char* input_file_path, Format_ct
 	}
 
 	return p_ifmt_ctx;
-}
-
-// Don't Use
-static AVFormatContext* init_output_format_2(AVFormatContext* p_ifmt_ctx, const char* output_file_path, AVCodecContext* enc_codec_ctx) {
-	AVOutputFormat	*p_ofmt = NULL;
-	AVFormatContext	*p_ofmt_ctx = NULL;
-
-	avformat_alloc_output_context2(&p_ofmt_ctx, NULL, NULL, output_file_path);
-	if (!p_ofmt_ctx)
-	{
-		fprintf(stderr, "Could not create output context\n");
-	}
-
-	p_ofmt = p_ofmt_ctx->oformat;
-
-	int ret = 0;
-	for (int i = 0; i < p_ifmt_ctx->nb_streams; i++)
-	{
-		AVStream *in_stream = p_ifmt_ctx->streams[i];
-		AVStream *out_stream = avformat_new_stream(p_ofmt_ctx, in_stream->codec->codec);
-
-		if (p_ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
-		{
-			ret = avcodec_copy_context(out_stream->codec, enc_codec_ctx);
-			out_stream->codec->codec_tag = 0;//문서
-		}
-		else if (p_ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO)
-		{
-			ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
-			out_stream->codec->codec_tag = 0;
-		}
-
-		if (ret < 0) {
-			fprintf(stderr, "Failed to copy context from input to output stream codec context\n");
-		}
-
-		if (p_ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
-		{
-			out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-		}
-	}
-
-	av_dump_format(p_ofmt_ctx, 0, output_file_path, 1);
-
-	if (!(p_ofmt->flags & AVFMT_NOFILE))
-	{
-		ret = avio_open(&p_ofmt_ctx->pb, output_file_path, AVIO_FLAG_WRITE);
-		if (ret < 0)
-		{
-			fprintf(stderr, "Could not open output file '%s'", output_file_path);
-		}
-	}
-
-	ret = avformat_write_header(p_ofmt_ctx, NULL);
-	if (ret < 0)
-	{
-		fprintf(stderr, "Error occurred when opening output file\n");
-	}
-	return p_ofmt_ctx;
 }
 
 static AVFormatContext* init_output_format(AVFormatContext* p_ifmt_ctx, const char* output_file_path, AVCodecContext* enc_codec_ctx) {
@@ -675,7 +563,7 @@ static int init_video_filter(FilterContext* filter_ctx)
 
 static int set_video_filter(FilterContext* F_ctx) {
 
-	// stream 관련 수정 필요.
+	// stream 관련 수정 필요. (수정 다함)
 	AVFilterContext* last_filter;
 	last_filter = F_ctx->filter_graph->filters[F_ctx->last_filter_idx];
 
@@ -733,156 +621,6 @@ char* find_Format(string input_format) {
 	{
 		return "ts";
 	}
-}
-
-void SaveFrame(AVFrame *pFrame, int width, int height, int iFrame, char* filename)
-{
-	FILE *pFile;
-	char szFilename[32];
-	int  y;
-
-	// Open file
-	sprintf_s(szFilename, "dump/frame%d.ppm", iFrame);
-	fopen_s(&pFile, szFilename, "wb");
-	if (pFile == NULL)
-		return;
-
-	// Write header
-	fprintf(pFile, "P6\n%d %d\n255\n", width, height);
-
-	// Write pixel data
-	for (y = 0; y < height; y++)
-		fwrite(pFrame->data[0] + y*pFrame->linesize[0], 1, width * 3, pFile);
-
-	// Close file
-	fclose(pFile);
-}
-
-int save_frame_as_jpeg(AVCodecContext *pCodecCtx, AVFrame *pFrame, int FrameNo) {
-	AVCodec *jpegCodec = avcodec_find_encoder(AV_CODEC_ID_JPEG2000);
-	if (!jpegCodec) {
-		return -1;
-	}
-	AVCodecContext *jpegContext = avcodec_alloc_context3(jpegCodec);
-	if (!jpegContext) {
-		return -1;
-	}
-
-	jpegContext->pix_fmt = AV_PIX_FMT_YUV420P;
-	jpegContext->height = pFrame->height;
-	jpegContext->width = pFrame->width;
-	jpegContext->time_base = { 1,25 };
-
-	if (avcodec_open2(jpegContext, jpegCodec, NULL) < 0) {
-		return -1;
-	}
-	FILE *JPEGFile;
-	char JPEGFName[256];
-
-	AVPacket packet;
-	av_init_packet(&packet);
-	int gotFrame;
-
-	if (avcodec_encode_video2(jpegContext, &packet, pFrame, &gotFrame) < 0) {
-		return -1;
-	}
-
-	sprintf(JPEGFName, "dvr-%06d.jpg", FrameNo);
-	JPEGFile = fopen(JPEGFName, "wb");
-	fwrite(packet.data, 1, packet.size, JPEGFile);
-	fclose(JPEGFile);
-
-	av_free_packet(&packet);
-	avcodec_close(jpegContext);
-	return 0;
-}
-
-int dump_frame_to_jpeg(AVContext * av, Options * options, int frameno, char* timestamp) {
-	AVCodec *jpegCodec = avcodec_find_encoder(AV_CODEC_ID_JPEG2000);
-	if (!jpegCodec) {
-		return -1;
-	}
-	AVCodecContext *jpegContext = avcodec_alloc_context3(jpegCodec);
-	if (!jpegContext) {
-		return -1;
-	}
-
-	jpegContext->pix_fmt = av->video_dec_ctx->pix_fmt;
-	jpegContext->height = av->frame->height;
-	jpegContext->width = av->frame->width;
-	jpegContext->sample_aspect_ratio = av->video_dec_ctx->sample_aspect_ratio;
-	jpegContext->time_base = av->video_dec_ctx->time_base;
-	jpegContext->compression_level = 100;
-	jpegContext->thread_count = 1;
-	jpegContext->prediction_method = 1;
-	jpegContext->flags2 = 0;
-	jpegContext->rc_max_rate = jpegContext->rc_min_rate = jpegContext->bit_rate = 80000000;
-	//   DEBUG( "after setting jpegContext" );
-
-	if (avcodec_open2(jpegContext, jpegCodec, NULL) < 0) {
-		return -1;
-	}
-	//  DEBUG( "after opening jpegContext" );
-	FILE *JPEGFile;
-	char JPEGFName[256];
-
-	AVPacket packet;
-	av_init_packet(&packet);
-	int gotFrame;
-	//  DEBUG( "after initializing packet" );
-	av_dump_format(av->fmt_ctx, 0, "", 0);
-
-	if (avcodec_encode_video2(jpegContext, &packet, av->frame, &gotFrame) < 0) {
-		return -1;
-	}
-
-	//   DEBUG( "after encoding video" );
-
-	//   if( DO_TIMESTAMPS ) {
-	sprintf(JPEGFName, options->output_file_pattern, frameno);
-
-	JPEGFile = fopen(JPEGFName, "wb");
-	fwrite(packet.data, 1, packet.size, JPEGFile);
-	fclose(JPEGFile);
-	//   DEBUG( "after writing frame" );
-
-	av_free_packet(&packet);
-	avcodec_close(jpegContext);
-
-	return 0;
-}
-
-void SaveBMP(AVFrame *frame, int width, int height, int iframe) {
-	// set filename
-	char filename[32];
-	sprintf(filename, "frame%d.bmp", iframe);
-	// create file
-	FILE *fout;
-	fout = fopen(filename, "wb");
-	// create bmp header
-	BITMAPFILEHEADER bmpheader;
-	bmpheader.bfReserved1 = 0;
-	bmpheader.bfReserved2 = 0;
-	bmpheader.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
-	bmpheader.bfSize = bmpheader.bfOffBits + width*height * 24 / 8;
-	// create bmp info
-	BITMAPINFO bmpinfo;
-	bmpinfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-	bmpinfo.bmiHeader.biWidth = width;
-	bmpinfo.bmiHeader.biHeight = -height;
-	bmpinfo.bmiHeader.biPlanes = 1;
-	bmpinfo.bmiHeader.biBitCount = 24;
-	bmpinfo.bmiHeader.biCompression = BI_RGB;
-	bmpinfo.bmiHeader.biSizeImage = 0;
-	bmpinfo.bmiHeader.biXPelsPerMeter = 100;
-	bmpinfo.bmiHeader.biYPelsPerMeter = 100;
-	bmpinfo.bmiHeader.biClrUsed = 0;
-	bmpinfo.bmiHeader.biClrImportant = 0;
-	// write file
-	fwrite(&bmpheader, sizeof(BITMAPFILEHEADER), 1, fout);
-	fwrite(&bmpinfo.bmiHeader, sizeof(BITMAPINFOHEADER), 1, fout);
-	fwrite(frame->data[0], width*height * 24 / 8, 1, fout);
-	fclose(fout);
 }
 
 void SaveAsBMP(AVFrame *pFrameRGB, int width, int height, int index, int bpp)
@@ -960,63 +698,70 @@ int main()
 	fmt_ctx->ofmt_ctx = add_stream_output_format(fmt_ctx_audio, fmt_ctx, A_enc_codec_ctx, Audio_flag);
 	fmt_ctx->ofmt_ctx = write_output_header(fmt_ctx, outputfile);
 
+	// Read Var (file을 읽으면 값이 저장 될 변수)
+	AVPacket read_pkt;				// 읽은 파일의 패킷
+	AVPacket out_pkt;				// 저장할 파일의 패킷
+	AVFrame* pVFrame;				// 디코딩된 비디오 프레임
+	AVFrame* pAFrame;				// 디코딩된 오디오 프레임
+	AVFrame* filtered_frame;		// 필터된 프레임
 
-
-	// Read Var
-	AVPacket read_pkt;
-	AVPacket out_pkt;
-	AVFrame* pVFrame;
-	AVFrame* pAFrame;
-	AVFrame* filtered_frame;
-
-	// Flag
-	int bGotPicture = 0;		// flag for video decoding
-	int bGotSound = 0;			// flag for audio decoding
-
-								// Frame Alloc
-	pVFrame = av_frame_alloc();
+									// Flag
+	int bGotPicture = 0;			// flag for video decoding
+	int bGotSound = 0;				// flag for audio decoding				
+	pVFrame = av_frame_alloc();		// Frame Alloc
 	pAFrame = av_frame_alloc();
 	filtered_frame = av_frame_alloc();
 
 	// Packet init
 	av_init_packet(&out_pkt);
 
+
+
+	/* 필터 설정 부분 */
+
 	// Video Filter Setting
-	init_video_filter(&vfilter_ctx);									// Initialize Filter
-	//insert_filter(&vfilter_ctx, "hue", "H=t*PI/2:s=1", 0);					// Apply Null Filter
-	insert_filter(&vfilter_ctx, "format", "yuva420p", 0);
-	set_video_filter(&vfilter_ctx);							// Link Output Filter
+	init_video_filter(&vfilter_ctx);										// Initialize Filter
+	insert_filter(&vfilter_ctx, "hue", "H=t*PI/2:s=1", 0);					// Apply hue Filter
+	insert_filter(&vfilter_ctx, "format", "yuva420p", 0);					// Apply Alpha
+	set_video_filter(&vfilter_ctx);											// Link Output Filter
 
-	// Image Filter Setting
-
+																			// Image Filter Setting
 	int V_width = V_enc_codec_ctx->width;
 	int V_height = V_enc_codec_ctx->height;
 
-	string str_left = to_string(V_width);						// 필터에 입력할 명령어
-	string str_right = to_string(V_height);						// 필터에 입력할 명령어
+	string str_left = to_string(V_width);									// 필터에 입력할 명령어
+	string str_right = to_string(V_height);									// 필터에 입력할 명령어
 	string str = str_left + ":" + str_right;
-	const char *cstr;				// 명령어 변환 (String to char)
-	cstr = str.c_str();				// 명령어 변환 실행
+	const char *cstr;														// 명령어 변환 (String to char)
+	cstr = str.c_str();														// 명령어 변환 실행
 	init_video_filter(&afilter_ctx);
 	insert_filter(&afilter_ctx, "scale", "128:128", 0);
 	insert_filter(&afilter_ctx, "format", "yuva420p", 0);
-	//insert_filter(&afilter_ctx, "deshake", "", 0);
 	set_video_filter(&afilter_ctx);
 
-	int stream_index;
+	/* 필터 설정 부분 종료 */
+
+
+
+	/* 이미지 입력 부분 */
 
 	if (!OpenImage(szImagePath)) {
 		return 0;
 	}
 
+	/* 이미지 입력 종료 */
+
+	/* 입력한 이미지 좌표 변환용 임시 변수 */
 	int ret = -1;
-	int flag = 0;
-	int i = 0;
-	int d_x = 0;
-	int d_y = 0;
 	int valo = 0;
 	bool dire = true;
 	srand((unsigned int)time(NULL));
+
+
+	int d_x = 0;				// 마스킹 위치
+	int d_y = 0;
+	int stream_index;			// 프레임 인덱스 (비디오, 오디오)
+	int i = 0;
 	// Video
 	while (av_read_frame(fmt_ctx->ifmt_ctx, &read_pkt) >= 0)
 	{
@@ -1059,94 +804,93 @@ int main()
 					}
 				}
 
-				//////////////////
+				/* YUV -> RGB 변환 부분 */
 				RGBImage* frame;
 				frame = new RGBImage(dst_width, dst_height);
-				frame->copyFrame(filtered_frame);
-				u_char s_R, s_G, s_B;
-				u_char d_R, d_G, d_B;
-				u_char r_R, r_G, r_B;
-				u_char Alpha_value;
+				frame->copyFrame(filtered_frame);						// Video frame을 RGB로 Copy.
+				u_char s_R, s_G, s_B;									// Source
+				u_char d_R, d_G, d_B;									// Destination
+				u_char r_R, r_G, r_B;									// Result
+				u_char Alpha_value;										// Alpha
 
 				RGBImage* m_frame;
 				m_frame = new RGBImage(dst_width, dst_height);
-				m_frame->copyFrame_Alpha(m_picture_frame);
+				m_frame->copyFrame_Alpha(m_picture_frame);				// Mask의 frame을 RGB로 Copy.
+																		/* YUV -> RGB 변환 부분 종료 */
 
+
+																		/* 비디오를 편집 할 부분 정의*/
 				int start = 5 * fmt_ctx->ofmt_ctx->streams[0]->codec->time_base.den;
 				int end = 10 * fmt_ctx->ofmt_ctx->streams[0]->codec->time_base.den;
+				/* 비디오를 편집 할 부분 정의 종료 */
 
+				/* 편집 될 위치 */
 				int W = filtered_frame->linesize[0];
 				int H = 480 + 74;
+				/* 편집 될 위치 종료 */
 
-				// 오버레이 할 위치
-				int Overlay_Position = 0;
-				int Overlay_position = 0;
-
+				/* 마스킹할 이미지의 정보 */
 				int Image_S_W = 0;	// 이미지 시작점
 				int Image_S_H = 0;
 				int Image_W = 128;	// 이미지 크기
 				int Image_H = 128;
 
+				/* 이미지가 이동하는 방향, 속도 정의 (예시)*/
 				if (dire) {
 					valo = valo + 1;
 				}
 				else {
 					valo = valo - 1;
 				}
-
 				if (valo >= 4) {
 					dire = false;
 				}
-
 				if (valo <= -3) {
 					dire = true;
 				}
-
 				d_x = d_x + valo;
 				d_y = d_y + valo;
-
-
 				if (d_x > (300) || d_y > (300)) {
 					d_x = 0;
 					d_y = 0;
 				}
+				/* 이미지가 이동하는 방향, 속도 정의 종료 */
 
-
-				if (i < start || i > end) {
-
+				// Video의 Start 부터 End 까지 편집 ( 구간 설정 )
+				if (i >= start && i <= end) {
+					// 마스킹 할 Image의 사이즈 만큼 편집
 					for (int i = Image_S_H; i < Image_H + Image_S_H; i++) {
 						for (int j = Image_S_W; j < Image_W + Image_S_W; j++) {
+							// Alpha 값이 있는 Data만 편집
 							if (!m_frame->checkPixelAlpha(i*Image_W + j)) {
+								// frame data를 가져옴
 								m_frame->getPixelColor_Alpha(s_R, s_G, s_B, Alpha_value, i*Image_W + j);
 								frame->getPixelColor(d_R, d_G, d_B, ((i + d_y)*W) + (j + d_x));
+								// Alpha blending.
 								if (Alpha_value > 254) {
 									r_R = ((float)((Alpha_value) / 255) * s_R) + (((float)(255 - Alpha_value) / 255) * d_R);
 									r_B = ((float)((Alpha_value) / 255) * s_B) + (((float)(255 - Alpha_value) / 255) * d_B);
 									r_G = ((float)((Alpha_value) / 255) * s_G) + (((float)(255 - Alpha_value) / 255) * d_G);
+									// blending한 data를 다시 frame에 설정해줌.
 									frame->setPixelColor(r_R, r_G, r_B, ((i + d_y)*W) + (j + d_x));
 								}
-
 							}
 						}
 					}
+					// YUV로 다시 설정.
 					frame->RGB2YUV(*filtered_frame);
 					delete frame;
-					if (avcodec_send_frame(V_enc_codec_ctx, filtered_frame) < 0) {
-						av_log(NULL, AV_LOG_ERROR, "Video Send Frame Error\n");
-					}
 				}
-				//else {
-				//	m_picture_frame->pts = pVFrame->pts;
-				//	if (avcodec_send_frame(V_enc_codec_ctx, m_picture_frame) < 0) {
-				//		av_log(NULL, AV_LOG_ERROR, "Video Send Frame Error\n");
-				//	}
-				//}
 
 				// Encoding
+				if (avcodec_send_frame(V_enc_codec_ctx, filtered_frame) < 0) {
+					av_log(NULL, AV_LOG_ERROR, "Video Send Frame Error\n");
+				}
 				if (avcodec_receive_packet(V_enc_codec_ctx, &out_pkt) >= 0) {
 					cout << "Video Write Frame [pts]=>" << out_pkt.pts << "  [size]=>" << out_pkt.size << endl;
 					av_interleaved_write_frame(fmt_ctx->ofmt_ctx, &out_pkt);
 					av_free_packet(&out_pkt);
+					i++;
 				}
 			}
 		}
@@ -1173,41 +917,37 @@ int main()
 	}
 
 	// Audio
-	/*
-	while (av_read_frame(fmt_ctx_audio->ifmt_ctx, &read_pkt) >= 0) {
-	// Check Audio stream & Read Packet
-	if (read_pkt.stream_index == fmt_ctx_audio->nASI)
-	{
-	if (read_pkt.data != NULL)
-	{
+	//
+	//while (av_read_frame(fmt_ctx_audio->ifmt_ctx, &read_pkt) >= 0) {
+	//	// Check Audio stream & Read Packet
+	//	if (read_pkt.stream_index == fmt_ctx_audio->nASI)
+	//	{
+	//		if (read_pkt.data != NULL)
+	//		{
+	//			// Decode
+	//			if (avcodec_send_packet(dec_A_ctx, &read_pkt) < 0)
+	//				av_log(NULL, AV_LOG_ERROR, "Audio Send Packet Error\n");
+	//			if (avcodec_receive_frame(dec_A_ctx, pAFrame) < 0)
+	//				av_log(NULL, AV_LOG_ERROR, "Audio Receive Frame Error\n");
+	//			// Encode
+	//			ret = avcodec_send_frame(A_enc_codec_ctx, pAFrame);
+	//			if (ret < 0)
+	//				av_log(NULL, 16, "Audio Send Frame Error\n");
+	//			ret = avcodec_receive_packet(A_enc_codec_ctx, &out_pkt);
+	//			if (ret < 0)
+	//				av_log(NULL, 16, "Audio Receive Packet Error\n");
+	//			// Write
+	//			cout << "Audio Write Frame [pts]=>" << read_pkt.pts << "  [size]=>" << read_pkt.size << endl;
+	//			av_interleaved_write_frame(fmt_ctx->ofmt_ctx, &read_pkt);
+	//			av_free_packet(&out_pkt);
+	//		}
+	//	}
+	//}
+	//
 
-	// Decode
-	if (avcodec_send_packet(dec_A_ctx, &read_pkt) < 0)
-	av_log(NULL, AV_LOG_ERROR, "Audio Send Packet Error\n");
-	if (avcodec_receive_frame(dec_A_ctx, pAFrame) < 0)
-	av_log(NULL, AV_LOG_ERROR, "Audio Receive Frame Error\n");
 
-	// Encode
-	ret = avcodec_send_frame(A_enc_codec_ctx, pAFrame);
-	if (ret < 0)
-	av_log(NULL, 16, "Audio Send Frame Error\n");
-	ret = avcodec_receive_packet(A_enc_codec_ctx, &out_pkt);
-	if (ret < 0)
-	av_log(NULL, 16, "Audio Receive Packet Error\n");
-
-	// Write
-	cout << "Audio Write Frame [pts]=>" << read_pkt.pts << "  [size]=>" << read_pkt.size << endl;
-	av_interleaved_write_frame(fmt_ctx->ofmt_ctx, &read_pkt);
-	av_free_packet(&out_pkt);
-	}
-	}
-	}
-	*/
 	// Write File Trailer
 	av_write_trailer(fmt_ctx->ofmt_ctx);
-
-
-
 
 	// Release
 	avcodec_close(V_enc_codec_ctx);
